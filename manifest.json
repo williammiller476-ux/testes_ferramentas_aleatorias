@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "CapCut Auto TTS",
+  "version": "1.0",
+  "permissions": ["activeTab", "scripting"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.capcut.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}

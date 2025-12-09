@@ -1,110 +1,104 @@
-// content.js
+let executando = false; // Variável de controle (bandeira)
 
-// Ouve o comando do popup para começar
-window.addEventListener("message", (event) => {
-  if (event.data.type === "INICIAR_AUTOMACAO") {
-    console.log("--- Iniciando Automação CapCut ---");
-    processarFalas(0);
+// Ouve os comandos
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === "INICIAR_AUTOMACAO") {
+    if (!executando) { // Evita iniciar duas vezes
+      console.log("--- Iniciando Automação ---");
+      executando = true;
+      processarFalas(0);
+    }
+  } else if (request.type === "PARAR_AUTOMACAO") {
+    console.log("--- COMANDO DE PARADA RECEBIDO ---");
+    executando = false; // Isso vai fazer o loop parar na próxima verificação
+    alert("Automação pausada/parada!");
   }
 });
 
 async function processarFalas(index) {
-  // 1. Pega TODOS os botões de "fala" visíveis na tela usando a classe do seu print
-  const botoesFala = document.querySelectorAll('.oral-ciN_Ll');
-
-  console.log(`Encontrados ${botoesFala.length} botões. Processando o número ${index + 1}...`);
-
-  if (index >= botoesFala.length) {
-    alert("Automação finalizada! Todos os itens foram processados.");
+  // 1. VERIFICAÇÃO DE SEGURANÇA: Se mandaram parar, a gente sai da função aqui
+  if (!executando) {
+    console.log("Execução interrompida pelo usuário.");
     return;
   }
 
+  const botoesFala = document.querySelectorAll('.oral-ciN_Ll');
+
+  if (index >= botoesFala.length) {
+    alert("Fim da lista!");
+    executando = false;
+    return;
+  }
+
+  console.log(`Processando item ${index + 1}/${botoesFala.length}...`);
   const botaoAtual = botoesFala[index];
 
-  // Garante que o botão está visível na tela (rola a página se necessário)
   botaoAtual.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  await sleep(1000); // Espera 1 seg para a rolagem terminar
+  await sleep(1000);
 
-  // Clica no botão para abrir o popup
+  // Verificação extra antes de clicar (caso você tenha clicado em parar durante o scroll)
+  if (!executando) return;
+
   botaoAtual.click();
   
-  // 2. Espera o popup abrir e procura pelo "Marcus"
   const marcusSelecionado = await selecionarMarcus();
 
-  if (marcusSelecionado) {
-    // 3. Aguarda o processamento (o loading)
+  if (marcusSelecionado && executando) { // Só continua se ainda estiver executando
     await esperarProcessamento();
+    await sleep(1500);
     
-    // Pequena pausa de segurança antes de ir para o próximo
-    await sleep(1500); 
-    
-    // RECURSIVIDADE: Chama a função para o próximo item
+    // Chama o próximo (Recursividade)
     processarFalas(index + 1); 
   } else {
-    console.error(`Falha ao selecionar Marcus no item ${index}. Tentando o próximo...`);
-    processarFalas(index + 1);
+    // Se falhou ou mandaram parar, tenta ir pro próximo se ainda estiver ativo
+    if(executando) processarFalas(index + 1);
   }
 }
 
-// --- Funções Auxiliares ---
-
+// --- As funções auxiliares continuam iguais ---
 async function selecionarMarcus() {
-  console.log("Procurando 'Marcus'...");
   return new Promise((resolve) => {
     let tentativas = 0;
-    const maxTentativas = 20; // 10 segundos tentando
-
     const intervalo = setInterval(() => {
+      // Se o usuário mandou parar no meio da busca, a gente cancela
+      if (!executando) {
+        clearInterval(intervalo);
+        resolve(false);
+        return;
+      }
+
       tentativas++;
+      const elementoMarcus = document.evaluate("//span[contains(text(), 'Marcus')]", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 
-      // Procura pelo TEXTO "Marcus" na tela usando XPath (mais seguro que classe)
-      const elementoMarcus = document.evaluate(
-        "//span[contains(text(), 'Marcus')]", 
-        document, 
-        null, 
-        XPathResult.FIRST_ORDERED_NODE_TYPE, 
-        null
-      ).singleNodeValue;
-
-      // Se achou o texto Marcus
       if (elementoMarcus) {
         clearInterval(intervalo);
-        
-        // Clica no elemento. Às vezes é preciso clicar no pai do texto.
-        // Vamos tentar clicar no texto primeiro.
         elementoMarcus.click();
-        
-        // Tenta clicar também no container pai, caso o clique no texto não funcione
         if(elementoMarcus.parentElement) elementoMarcus.parentElement.click();
-
-        console.log("Marcus selecionado!");
         resolve(true);
-      } else if (tentativas >= maxTentativas) {
+      } else if (tentativas >= 20) {
         clearInterval(intervalo);
-        console.log("Tempo esgotado: Marcus não apareceu.");
         resolve(false);
       }
-    }, 500); // Checa a cada meio segundo
+    }, 500);
   });
 }
 
 async function esperarProcessamento() {
-  console.log("Aguardando geração do áudio...");
-  // Vamos dar um tempo fixo inicial para o loading aparecer
   await sleep(2000); 
-
   return new Promise((resolve) => {
     const intervalo = setInterval(() => {
-      // Procura se existe algum texto indicando carregamento na tela
-      // Ajuste o texto abaixo se a mensagem for diferente de "Criando..."
+      // Se mandou parar, sai do loop
+      if (!executando) {
+        clearInterval(intervalo);
+        resolve();
+        return;
+      }
+
       const corpoPagina = document.body.innerText;
-      const estaCarregando = corpoPagina.includes("Criando a locução") || 
-                             corpoPagina.includes("Gerando") ||
-                             corpoPagina.includes("%"); // Geralmente tem porcentagem
+      const estaCarregando = corpoPagina.includes("Criando a locução") || corpoPagina.includes("Gerando") || corpoPagina.includes("%");
 
       if (!estaCarregando) {
         clearInterval(intervalo);
-        console.log("Processamento concluído.");
         resolve();
       }
     }, 1000);
